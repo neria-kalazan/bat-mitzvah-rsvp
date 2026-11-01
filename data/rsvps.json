@@ -1,0 +1,21 @@
+[
+  {
+    "count": 4,
+    "createdAt": "2026-10-30T10:05:43.209Z",
+    "wishingMessage": "אורי המתוקה, מזל טוב בהגיעך לגיל מצוות. שימלא ה' כל משאלות ליבך לטובה.\n❤️ משפחת נהרי",
+    "type": "family",
+    "id": "rsvp-1793354743209-jrvtn",
+    "plusOne": false,
+    "attending": true,
+    "name": "נהרי אודיה ואבישי"
+  },
+  {
+    "type": "family",
+    "attending": true,
+    "count": 1,
+    "name": "עמית מסורי",
+    "plusOne": false,
+    "id": "rsvp-1793345120807-it1m7",
+    "createdAt": "2026-10-30T07:25:20.807Z"
+  }
+]

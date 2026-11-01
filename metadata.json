@@ -1,0 +1,8 @@
+{
+  "name": "אישורי הגעה לבת מצווה של אורי",
+  "description": "מערכת אישורי הגעה אלגנטית לבת המצווה של אורי | משפחת קלזן, קרני שומרון.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

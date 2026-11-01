@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "rsvp": {
+      "title": "RSVP",
+      "description": "Guest RSVP submission for the Bat Mitzvah event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["friend", "family"] },
+        "name": { "type": "string" },
+        "contactName": { "type": "string" },
+        "plusOne": { "type": "boolean" },
+        "plusOneName": { "type": "string" },
+        "count": { "type": "number" },
+        "phone": { "type": "string" },
+        "attending": { "type": "boolean" },
+        "dietary": { "type": "string" },
+        "songRequest": { "type": "string" },
+        "wishingMessage": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "type", "name", "count", "attending", "createdAt"]
+    },
+    "souvenir": {
+      "title": "Souvenir",
+      "description": "User created commemorative photo souvenir",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "guestId": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "styleId": { "type": "string" },
+        "styleName": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "customPrompt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "creatorName", "styleId", "styleName", "imageUrl", "createdAt"]
+    },
+    "event_details": {
+      "title": "EventDetails",
+      "description": "Event configuration and celebratory metadata",
+      "type": "object",
+      "properties": {
+        "celebrantName": { "type": "string" },
+        "subTitle": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "receptionTime": { "type": "string" },
+        "venueName": { "type": "string" },
+        "address": { "type": "string" },
+        "wazeUrl": { "type": "string" },
+        "googleMapsUrl": { "type": "string" },
+        "welcomeMessage": { "type": "string" },
+        "dressCode": { "type": "string" },
+        "contactPhone": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["celebrantName", "date", "venueName"]
+    }
+  },
+  "firestore": {
+    "/rsvps/{rsvpId}": {
+      "schema": "rsvp",
+      "description": "Collection of all guest RSVPs"
+    },
+    "/souvenirs/{souvenirId}": {
+      "schema": "souvenir",
+      "description": "Collection of all public community souvenir photos"
+    },
+    "/settings/{settingId}": {
+      "schema": "event_details",
+      "description": "Event settings and details"
+    }
+  }
+}
