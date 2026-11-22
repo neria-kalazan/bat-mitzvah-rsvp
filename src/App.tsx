@@ -12,6 +12,7 @@ import { OriginalInvitationModal } from './components/OriginalInvitationModal';
 import { WishesWall } from './components/WishesWall';
 import { PersonalPhotoSouvenirPage } from './components/PersonalPhotoSouvenirPage';
 import { SouvenirGalleryPage } from './components/SouvenirGalleryPage';
+import { SlideshowPage } from './components/SlideshowPage';
 import { RSVP, EventDetails } from './types';
 import {
   fetchEventDetails,
@@ -38,13 +39,23 @@ const FALLBACK_EVENT: EventDetails = {
   contactPhone: '050-1234567',
 };
 
-type View = 'home' | 'photo-souvenir' | 'gallery' | 'parents-admin';
+type View = 'home' | 'photo-souvenir' | 'gallery' | 'parents-admin' | 'slideshow';
 
 function getInitialView(): View {
   if (typeof window === 'undefined') return 'home';
   const path = window.location.pathname.toLowerCase();
   const hash = window.location.hash.toLowerCase();
   const search = window.location.search.toLowerCase();
+
+  if (
+    path === '/slideshow' ||
+    path.startsWith('/slideshow') ||
+    hash.includes('slideshow') ||
+    search.includes('slideshow')
+  ) {
+    return 'slideshow';
+  }
+
   if (
     path === '/parents' ||
     path.startsWith('/parents') ||
@@ -105,6 +116,7 @@ export default function App() {
     if (view === 'parents-admin') newPath = '/parents';
     else if (view === 'photo-souvenir') newPath = '/souvenir';
     else if (view === 'gallery') newPath = '/gallery';
+    else if (view === 'slideshow') newPath = '/slideshow';
 
     if (window.location.pathname !== newPath) {
       window.history.pushState(null, '', newPath);
@@ -224,9 +236,20 @@ export default function App() {
         onDeleteRSVP={handleDeleteRSVP}
         onUpdateEvent={handleUpdateEvent}
         onRefreshRSVPs={async () => {
-          const fresh = await fetchRSVPs();
+          const fresh = await fetchRSVPs(true);
           setRsvps(fresh);
         }}
+        onOpenSlideshow={() => navigateTo('slideshow')}
+      />
+    );
+  }
+
+  // Dedicated slideshow projection view (Accessible via /slideshow or from parents admin)
+  if (currentView === 'slideshow') {
+    return (
+      <SlideshowPage
+        event={event}
+        onBack={() => navigateTo('parents-admin')}
       />
     );
   }
@@ -250,6 +273,7 @@ export default function App() {
         event={event}
         onBack={() => navigateTo('home')}
         onNavigateToDesign={() => navigateTo('photo-souvenir')}
+        onOpenSlideshow={() => navigateTo('slideshow')}
         primaryRsvp={primaryRsvp}
       />
     );

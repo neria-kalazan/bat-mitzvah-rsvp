@@ -1,21 +1,72 @@
 [
   {
-    "count": 4,
-    "createdAt": "2026-10-30T10:05:43.209Z",
-    "wishingMessage": "אורי המתוקה, מזל טוב בהגיעך לגיל מצוות. שימלא ה' כל משאלות ליבך לטובה.\n❤️ משפחת נהרי",
-    "type": "family",
-    "id": "rsvp-1793354743209-jrvtn",
+    "songRequest": "",
+    "name": "רינת כהן",
+    "count": 1,
+    "createdAt": "2026-11-01T18:19:47.949Z",
     "plusOne": false,
+    "type": "friend",
     "attending": true,
-    "name": "נהרי אודיה ואבישי"
+    "id": "rsvp-1793557187949-91hz4",
+    "wishingMessage": ""
   },
   {
-    "type": "family",
+    "wishingMessage": "מזל טובבבבב",
+    "name": "עדי ודולב",
     "attending": true,
-    "count": 1,
-    "name": "עמית מסורי",
     "plusOne": false,
+    "id": "rsvp-1793556935775-9bgx4",
+    "type": "family",
+    "songRequest": "",
+    "count": 2,
+    "createdAt": "2026-11-01T18:15:35.775Z"
+  },
+  {
+    "type": "friend",
+    "createdAt": "2026-11-01T18:09:00.415Z",
+    "attending": true,
+    "name": "ליה שפירא",
+    "songRequest": "",
+    "wishingMessage": "אורי המהממת מחכה לחגוג ולרקוד איתך!!! אוהבת המון ליה",
+    "plusOne": false,
+    "count": 1,
+    "id": "rsvp-1793556540415-qmkgf"
+  },
+  {
+    "songRequest": "עוד ישמע",
+    "attending": true,
+    "phone": "054-1112233",
+    "count": 3,
+    "type": "family",
+    "id": "sheet-manual-test-1",
+    "wishingMessage": "המון מזל טוב!",
+    "createdAt": "2026-11-01T16:14:43.307Z",
+    "name": "משפחת אלון (נוספה ידנית ב-Sheets)"
+  },
+  {
+    "name": "נהרי אודיה ואבישי",
+    "count": 4,
+    "songRequest": "",
+    "plusOne": false,
+    "phone": "מגיע/ה",
+    "wishingMessage": "אורי המתוקה, מזל טוב בהגיעך לגיל מצוות. שימלא ה' כל משאלות ליבך לטובה.\n❤️ משפחת נהרי",
+    "attending": true,
+    "createdAt": "2026-10-30T10:05:43.209Z",
+    "id": "rsvp-1793354743209-jrvtn",
+    "dietary": "rsvp-1793354743209-jrvtn",
+    "type": "family"
+  },
+  {
+    "wishingMessage": "",
+    "dietary": "rsvp-1793345120807-it1m7",
+    "attending": true,
+    "name": "עמית מסורי",
+    "count": 1,
     "id": "rsvp-1793345120807-it1m7",
-    "createdAt": "2026-10-30T07:25:20.807Z"
+    "createdAt": "2026-10-30T07:25:20.807Z",
+    "plusOne": false,
+    "songRequest": "",
+    "type": "family",
+    "phone": "מגיע/ה"
   }
 ]

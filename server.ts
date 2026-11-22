@@ -4,7 +4,6 @@ import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import sharp from 'sharp';
-import opentype from 'opentype.js';
 import { GoogleGenAI } from '@google/genai';
 
 // Ensure fontconfig discovers the bundled repository fonts if invoked by system libraries
@@ -232,105 +231,9 @@ function saveSouvenirs(items: SouvenirItem[]) {
   }
 }
 
-// Load fonts once into memory for ultra-fast, 100% fontconfig-independent vector rendering
-let vectorBoldFont: opentype.Font | null = null;
-let vectorRegFont: opentype.Font | null = null;
-let vectorFallbackFont: opentype.Font | null = null;
-
-try {
-  const boldFile = path.join(FONTS_DIR, 'NotoSansHebrew-Bold.ttf');
-  const regFile = path.join(FONTS_DIR, 'NotoSansHebrew-Regular.ttf');
-  const fallbackFile = path.join(FONTS_DIR, 'DejaVuSans.ttf');
-
-  if (fs.existsSync(boldFile)) {
-    const b = fs.readFileSync(boldFile);
-    vectorBoldFont = opentype.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
-  }
-  if (fs.existsSync(regFile)) {
-    const b = fs.readFileSync(regFile);
-    vectorRegFont = opentype.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
-  }
-  if (fs.existsSync(fallbackFile)) {
-    const b = fs.readFileSync(fallbackFile);
-    vectorFallbackFont = opentype.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
-  }
-  console.log('[fonts] Vector Hebrew fonts loaded successfully (NotoSansHebrew + DejaVuSans fallback)');
-} catch (fontErr) {
-  console.warn('[fonts] Could not preload vector fonts, will use SVG text fallback:', fontErr);
-}
-
-/**
- * Converts a text segment to an SVG path using pure OpenType glyph vectors.
- * If a character is missing from primary Hebrew font (e.g. Latin numbers '2.12.26' or '•'),
- * it falls back to DejaVuSans so every glyph is always present and rendered cleanly.
- */
-function renderSegmentToVectorPath(
-  text: string,
-  primaryFont: opentype.Font | null,
-  fallbackFont: opentype.Font | null,
-  x: number,
-  y: number,
-  fontSize: number,
-  isRTL = false
-): { path: opentype.Path; width: number } {
-  const p = new opentype.Path();
-  if (!primaryFont) {
-    return { path: p, width: 0 };
-  }
-  const str = isRTL ? text.split('').reverse().join('') : text;
-  let curX = x;
-
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    let f = primaryFont;
-    let g = f.charToGlyph(ch);
-    if (!g || g.name === '.notdef' || g.index === 0) {
-      if (fallbackFont) {
-        f = fallbackFont;
-        g = f.charToGlyph(ch);
-      }
-    }
-    const scale = (1 / f.unitsPerEm) * fontSize;
-    const glyphPath = g.getPath(curX, y, fontSize);
-    p.commands.push(...glyphPath.commands);
-    curX += (g.advanceWidth || 0) * scale;
-  }
-
-  return { path: p, width: curX - x };
-}
-
-function getSegmentVectorWidth(
-  text: string,
-  primaryFont: opentype.Font | null,
-  fallbackFont: opentype.Font | null,
-  fontSize: number,
-  isRTL = false
-): number {
-  if (!primaryFont) return 0;
-  const str = isRTL ? text.split('').reverse().join('') : text;
-  let w = 0;
-
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    let f = primaryFont;
-    let g = f.charToGlyph(ch);
-    if (!g || g.name === '.notdef' || g.index === 0) {
-      if (fallbackFont) {
-        f = fallbackFont;
-        g = f.charToGlyph(ch);
-      }
-    }
-    const scale = (1 / f.unitsPerEm) * fontSize;
-    w += (g.advanceWidth || 0) * scale;
-  }
-
-  return w;
-}
-
 /**
  * Applies the official, elegant Bat Mitzvah commemorative dedication banner onto the generated souvenir image.
- * Uses high-performance pure vector SVG bezier paths via OpenType.js and Sharp.
- * 100% immune to missing system fonts / tofu boxes in production containers.
+ * Uses crisp SVG typography with Noto Sans Hebrew / DejaVu Sans and Sharp.
  * Exactly matches: "מזכרת מבת המצווה של אורי קלזן"
  */
 async function applyDedicationOverlayServer(photoBase64OrDataUrl: string): Promise<string> {
@@ -346,121 +249,104 @@ async function applyDedicationOverlayServer(photoBase64OrDataUrl: string): Promi
     const width = metadata.width || 1024;
     const height = metadata.height || 1024;
 
-    const bannerHeight = Math.max(120, Math.round(height * 0.13));
+    const isPortrait = height > width;
+
+    // Banner height: sleeker and compact, noticeably less tall
+    const bannerRatio = isPortrait ? 0.088 : 0.11;
+    const bannerHeight = Math.max(95, Math.round(height * bannerRatio));
     const bannerY = height - bannerHeight;
-    const fadeHeight = Math.round(bannerHeight * 0.26);
 
-    const mainFontSize = Math.max(24, Math.round(width * 0.033));
-    const subFontSize = Math.max(13, Math.round(width * 0.0175));
-    const diamondSize = Math.max(4, Math.round(width * 0.005));
+    // Soft photographic blur / feather transition above the banner
+    const fadeHeight = Math.round(bannerHeight * 0.55);
+    const fadeStartY = bannerY - fadeHeight;
 
-    const mainY = bannerY + Math.round(bannerHeight * 0.45);
-    const subY = bannerY + Math.round(bannerHeight * 0.78);
+    // Font sizes: balanced for both landscape and portrait, larger as in the initial design
+    const baseDim = isPortrait
+      ? Math.min(width * 1.05, height * 0.75)
+      : Math.min(width, height * 1.35);
 
-    let textVectorElements = '';
+    const mainFontSize = Math.max(26, Math.round(baseDim * 0.0385));
+    const subFontSize = Math.max(14, Math.round(mainFontSize * 0.50));
 
-    if (vectorBoldFont && vectorFallbackFont) {
-      // Vector rendering: 100% immune to missing container fonts!
-      const titleText = 'מזכרת מבת המצווה של אורי קלזן';
-      const titleWidth = getSegmentVectorWidth(titleText, vectorBoldFont, vectorFallbackFont, mainFontSize, true);
-      const titleStartX = (width - titleWidth) / 2;
-      const titleResult = renderSegmentToVectorPath(titleText, vectorBoldFont, vectorFallbackFont, titleStartX, mainY, mainFontSize, true);
-      const titleShadow = renderSegmentToVectorPath(titleText, vectorBoldFont, vectorFallbackFont, titleStartX, mainY + 1.5, mainFontSize, true);
+    // Tight, cohesive typographic rhythm - vertically centered in the green background
+    const lineSpacing = Math.round(mainFontSize * 0.96);
+    const bannerCenterY = bannerY + Math.round(bannerHeight * 0.51);
+    const mainY = Math.round(bannerCenterY - lineSpacing / 2);
+    const subY = mainY + lineSpacing;
 
-      // Subtitle layout: Left to right on the screen:
-      // [קרני שומרון] [ • 2.12.26 • ] [יום רביעי, כב' כסלו] [🌿 leaf icon]
-      const regFont = vectorRegFont || vectorBoldFont;
-      const seg1 = 'קרני שומרון';
-      const seg2 = ' • 2.12.26 • ';
-      const seg3 = 'יום רביעי, כב\' כסלו';
+    // Leaf dimensions and position (placed to the right of the RTL subtitle line)
+    const textWidth = Math.round(subFontSize * 18.8);
+    const leafSize = Math.round(subFontSize * 0.95);
+    const gap = Math.round(subFontSize * 0.45);
 
-      const w1 = getSegmentVectorWidth(seg1, regFont, vectorFallbackFont, subFontSize, true);
-      const w2 = getSegmentVectorWidth(seg2, regFont, vectorFallbackFont, subFontSize, false);
-      const w3 = getSegmentVectorWidth(seg3, regFont, vectorFallbackFont, subFontSize, true);
-      const leafSpacing = Math.round(subFontSize * 0.45);
-      const leafWidth = subFontSize * 0.95;
-      const totalSubWidth = w1 + w2 + w3 + leafSpacing + leafWidth;
+    // Centered block coordinates
+    const textCenterX = Math.round(width / 2 - (leafSize + gap) / 2);
+    const leafX = Math.round(textCenterX + textWidth / 2 + gap);
+    const leafY = Math.round(subY - leafSize * 0.82);
+    const leafScale = (leafSize / 24).toFixed(3);
 
-      let curSubX = (width - totalSubWidth) / 2;
-
-      const r1 = renderSegmentToVectorPath(seg1, regFont, vectorFallbackFont, curSubX, subY, subFontSize, true);
-      curSubX += w1;
-
-      const r2 = renderSegmentToVectorPath(seg2, regFont, vectorFallbackFont, curSubX, subY, subFontSize, false);
-      curSubX += w2;
-
-      const r3 = renderSegmentToVectorPath(seg3, regFont, vectorFallbackFont, curSubX, subY, subFontSize, true);
-      curSubX += w3 + leafSpacing;
-
-      const leafY = subY - subFontSize * 0.78;
-      const leafScale = (subFontSize * 0.9) / 24;
-      const leafSvg = `
-        <g transform="translate(${curSubX.toFixed(2)}, ${leafY.toFixed(2)}) scale(${leafScale.toFixed(3)})">
-          <path d="M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66.95-2.3c.48.17.98.3 1.34.3 5.52 0 10-4.48 10-10V8c0-.69-.5-1.28-1.18-1.39A28.6 28.6 0 0 0 17 8zm-8.86 10.4c.73-1.63 1.77-3.5 3.36-4.9 1.63-1.44 3.73-2.4 6.5-2.9-1.2 3.8-3.6 6.3-6.5 7.4-.95.36-2.1.48-3.36.4z" fill="#78b159"/>
-          <path d="M7 6C4.5 7 3.5 9.5 3 12c1.5-.5 3-1.5 4-3 1-1.5 1-2.5 0-3z" fill="#9bc872"/>
-        </g>
-      `;
-
-      textVectorElements = `
-        <!-- Title Shadow & Main Text as Bezier Paths -->
-        <path d="${titleShadow.path.toPathData(2)}" fill="#000000" opacity="0.65" />
-        <path d="${titleResult.path.toPathData(2)}" fill="#ffffff" />
-
-        <!-- Subtitle as Bezier Paths -->
-        <path d="${r1.path.toPathData(2)}" fill="#d3e2d0" />
-        <path d="${r2.path.toPathData(2)}" fill="#d3e2d0" />
-        <path d="${r3.path.toPathData(2)}" fill="#d3e2d0" />
-        ${leafSvg}
-      `;
-    } else {
-      // Graceful fallback to SVG text tags
-      const titleText = 'מזכרת מבת המצווה של אורי קלזן';
-      const subText = 'יום רביעי, כב\' כסלו • 2.12.26 • קרני שומרון 🌿';
-      textVectorElements = `
-        <text x="${width / 2}" y="${mainY}" text-anchor="middle"
-              fill="#ffffff" font-size="${mainFontSize}" font-weight="bold"
-              font-family="'Noto Sans Hebrew', 'DejaVu Sans', 'Rubik', sans-serif"
-              letter-spacing="0.5">${titleText}</text>
-        <text x="${width / 2}" y="${subY}" text-anchor="middle"
-              fill="#d3e2d0" font-size="${subFontSize}" font-weight="500"
-              font-family="'Noto Sans Hebrew', 'DejaVu Sans', 'Rubik', sans-serif">${subText}</text>
-      `;
-    }
+    const titleText = 'מזכרת מבת המצווה של אורי קלזן';
+    const subText = "יום רביעי, כב' כסלו • 2.12.26 • קרני שומרון";
 
     const svgOverlay = Buffer.from(`
       <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
         <defs>
-          <linearGradient id="bannerFade" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#121713" stop-opacity="0" />
-            <stop offset="28%" stop-color="#121713" stop-opacity="0.80" />
-            <stop offset="65%" stop-color="#0c100d" stop-opacity="0.94" />
-            <stop offset="100%" stop-color="#070a08" stop-opacity="0.98" />
+          <linearGradient id="featherFade" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#0b120c" stop-opacity="0" />
+            <stop offset="20%" stop-color="#0b120c" stop-opacity="0.08" />
+            <stop offset="40%" stop-color="#0a110b" stop-opacity="0.25" />
+            <stop offset="60%" stop-color="#080e09" stop-opacity="0.52" />
+            <stop offset="80%" stop-color="#060a07" stop-opacity="0.80" />
+            <stop offset="100%" stop-color="#050805" stop-opacity="1" />
           </linearGradient>
-          <linearGradient id="goldLineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#c5a059" stop-opacity="0" />
-            <stop offset="15%" stop-color="#c5a059" stop-opacity="0.8" />
-            <stop offset="50%" stop-color="#fff8e7" stop-opacity="1" />
-            <stop offset="85%" stop-color="#c5a059" stop-opacity="0.8" />
-            <stop offset="100%" stop-color="#c5a059" stop-opacity="0" />
+          <linearGradient id="leafGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#388e3c" />
+            <stop offset="60%" stop-color="#66bb6a" />
+            <stop offset="100%" stop-color="#a5d6a7" />
           </linearGradient>
         </defs>
 
-        <!-- Dark Elegant Gradient Banner -->
-        <rect x="0" y="${bannerY - fadeHeight}" width="${width}" height="${bannerHeight + fadeHeight}" fill="url(#bannerFade)" />
+        <!-- 1. Dreamy soft blur / feather transition above the banner -->
+        <rect x="0" y="${fadeStartY}" width="${width}" height="${fadeHeight + 1}" fill="url(#featherFade)" />
 
-        <!-- Golden Divider Line -->
-        <line x1="${width * 0.06}" y1="${bannerY}" x2="${width * 0.94}" y2="${bannerY}" stroke="url(#goldLineGrad)" stroke-width="${Math.max(1.5, width * 0.002)}" />
+        <!-- 2. Solid deep botanical black banner below (100% opaque, hides any underlying artifacts) -->
+        <rect x="0" y="${bannerY}" width="${width}" height="${bannerHeight}" fill="#050805" />
 
-        <!-- Golden Diamond Emblem in Center -->
-        <polygon points="${width / 2},${bannerY - diamondSize} ${width / 2 + diamondSize},${bannerY} ${width / 2},${bannerY + diamondSize} ${width / 2 - diamondSize},${bannerY}" fill="#fff8e7" />
+        <!-- Title Shadow & Main Text: מזכרת מבת המצווה של אורי קלזן -->
+        <text x="${width / 2}" y="${mainY + 2}" text-anchor="middle"
+              fill="#000000" fill-opacity="0.85" font-size="${mainFontSize}" font-weight="bold"
+              font-family="'Noto Sans Hebrew', 'DejaVu Sans', 'Rubik', sans-serif">${titleText}</text>
+        <text x="${width / 2}" y="${mainY}" text-anchor="middle"
+              fill="#ffffff" font-size="${mainFontSize}" font-weight="bold"
+              font-family="'Noto Sans Hebrew', 'DejaVu Sans', 'Rubik', sans-serif">${titleText}</text>
 
-        ${textVectorElements}
+        <!-- Subtitle Text -->
+        <text x="${textCenterX}" y="${subY + 1.2}" text-anchor="middle"
+              fill="#000000" fill-opacity="0.7" font-size="${subFontSize}" font-weight="500"
+              font-family="'Noto Sans Hebrew', 'DejaVu Sans', 'Rubik', sans-serif">${subText}</text>
+        <text x="${textCenterX}" y="${subY}" text-anchor="middle"
+              fill="#d6e8d5" font-size="${subFontSize}" font-weight="500"
+              font-family="'Noto Sans Hebrew', 'DejaVu Sans', 'Rubik', sans-serif">${subText}</text>
+
+        <!-- Leaf Icon on the Right (Color Vector) -->
+        <g transform="translate(${leafX}, ${leafY}) scale(${leafScale})">
+          <!-- Stem -->
+          <path d="M 3,21 C 2,23 0,25 -2,26" stroke="#256029" stroke-width="1.8" stroke-linecap="round" fill="none" />
+          <!-- Main leaf blade -->
+          <path d="M 3,21 C 4,14 10,5 21,3 C 19,12 14,21 3,21 Z" fill="url(#leafGrad)" stroke="#2e7d32" stroke-width="0.8" />
+          <!-- Central vein -->
+          <path d="M 3,21 C 8,15 13,9 21,3" stroke="#256029" stroke-width="1.2" stroke-linecap="round" fill="none" />
+          <!-- Side vein branch -->
+          <path d="M 9,14 C 12,14.5 15,13 16,11" stroke="#337438" stroke-width="0.9" stroke-linecap="round" fill="none" />
+          <!-- Flutter secondary leaf -->
+          <path d="M 2,12 C 1,9 -2,8 -3,9 C -3,11 0,13 2,12 Z" fill="#81c784" stroke="#2e7d32" stroke-width="0.6" />
+        </g>
       </svg>
     `);
 
     const outputBuffer = await image
       .composite([{ input: svgOverlay, top: 0, left: 0 }])
-      .jpeg({ quality: 92 })
+      .jpeg({ quality: 93 })
       .toBuffer();
 
     return `data:image/jpeg;base64,${outputBuffer.toString('base64')}`;
@@ -548,8 +434,8 @@ const SOUVENIR_STYLE_PROMPTS: Record<string, string> = {
   'caricature': 'Charming, delightful, high-end celebratory caricature digital illustration, warm friendly expressions, respectful playful artistic stylization with big expressive eyes and joy.',
   'oil-painting': 'Masterpiece classical fine art oil painting, rich textured canvas brush strokes, warm golden Rembrandt chiaroscuro lighting, regal museum quality portrait.',
   'vintage-bw': 'Timeless 1940s classic Hollywood vintage black and white glamour portrait, deep silvery monochrome tones, authentic film grain, soft directional studio lighting.',
-  'princess': 'Enchanted royal fairy tale ball portrait, ethereal magical glowing sparkles, dreamy pastel flower garden backdrop, elegant festive regal atmosphere.',
-  'hawaii': 'Dreamy tropical Hawaiian paradise beach, sunset golden hour lighting over turquoise ocean waves, lush palm trees, warm ocean breeze, joyful vacation feel.',
+  'princess': 'Enchanted royal fairy tale ball portrait, ethereal magical glowing sparkles, dreamy pastel flower garden backdrop, elegant festive regal atmosphere, modest royal gowns with sleeves.',
+  'hawaii': 'Dreamy tropical Hawaiian paradise beach, sunset golden hour lighting over turquoise ocean waves, lush palm trees, colorful floral leis garland, festive tropical resort shirts or dresses with sleeves, warm ocean breeze, joyful modest vacation celebration feel.',
   '3d-animation': 'Modern 3D animated feature film hero style (Pixar/Disney 3D animation look), smooth stylized 3D forms, expressive radiant eyes, warm cinematic studio illumination.',
 };
 
@@ -578,8 +464,8 @@ async function startServer() {
 
   function handleFirestoreReadError(operation: string, err: any) {
     if (isQuotaExceededError(err)) {
-      // Backoff remote reads for 1 hour so the server doesn't hammer the exhausted quota
-      firestoreQuotaExceededUntil = Date.now() + 60 * 60 * 1000;
+      // Backoff remote reads for 5 minutes (reduced from 1 hour) so the server can recover faster
+      firestoreQuotaExceededUntil = Date.now() + 5 * 60 * 1000;
       const now = Date.now();
       if (now - lastQuotaWarningTime > 5 * 60 * 1000) {
         lastQuotaWarningTime = now;
@@ -678,6 +564,36 @@ async function startServer() {
     res.json({ status: 'ok', time: new Date().toISOString() });
   });
 
+  // --- Firestore Status & Quota Inspection ---
+  app.get('/api/firestore-status', async (req: Request, res: Response) => {
+    const retry = req.query.retry === 'true';
+    if (retry && firestoreDb) {
+      firestoreQuotaExceededUntil = 0;
+      try {
+        const snap = await getDocs(collection(firestoreDb, 'rsvps'));
+        if (!snap.empty) {
+          const items: RSVP[] = [];
+          snap.forEach((d) => items.push(d.data() as RSVP));
+          items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          saveRSVPs(items);
+          cachedRsvpsData = items;
+          lastRsvpsFetchTime = Date.now();
+        }
+      } catch (err: any) {
+        handleFirestoreReadError('Retry /api/firestore-status', err);
+      }
+    }
+
+    const isExceeded = Date.now() < firestoreQuotaExceededUntil;
+    res.json({
+      quotaExceeded: isExceeded,
+      quotaExceededUntil: firestoreQuotaExceededUntil,
+      projectId: 'watchful-virtue-698sv',
+      databaseId: 'ai-studio-batmitzvahrsvp-7b9fa98e-b18a-4e8a-a9e5-6aa16b5ba9f1',
+      upgradeUrl: 'https://console.firebase.google.com/project/watchful-virtue-698sv/firestore/databases/ai-studio-batmitzvahrsvp-7b9fa98e-b18a-4e8a-a9e5-6aa16b5ba9f1/data?openUpgradeDialog=true',
+    });
+  });
+
   // --- API Endpoints ---
   app.get('/api/event', async (_req: Request, res: Response) => {
     const now = Date.now();
@@ -721,9 +637,13 @@ async function startServer() {
     res.json(updated);
   });
 
-  app.get('/api/rsvps', async (_req: Request, res: Response) => {
+  app.get('/api/rsvps', async (req: Request, res: Response) => {
     const now = Date.now();
-    if (cachedRsvpsData && now - lastRsvpsFetchTime < 30000) {
+    const forceRefresh = req.query.refresh === 'true';
+    if (forceRefresh) {
+      cachedRsvpsData = null;
+      firestoreQuotaExceededUntil = 0;
+    } else if (cachedRsvpsData && now - lastRsvpsFetchTime < 30000) {
       return res.json(cachedRsvpsData);
     }
 
@@ -749,7 +669,7 @@ async function startServer() {
     res.json(local);
   });
 
-  app.post('/api/rsvps', (req: Request, res: Response) => {
+  app.post('/api/rsvps', async (req: Request, res: Response) => {
     const {
       id,
       type,
@@ -821,8 +741,8 @@ async function startServer() {
         });
       }
 
-      // Automatically forward updated RSVP to Google Sheets in background
-      forwardRsvpToGoogleSheets(updatedRSVP);
+      // Automatically forward updated RSVP directly to Google Sheets
+      await forwardRsvpToGoogleSheets(updatedRSVP);
 
       return res.status(200).json({ ...updatedRSVP, isUpdated: true });
     }
@@ -856,18 +776,18 @@ async function startServer() {
       });
     }
 
-    // Automatically forward new RSVP to Google Sheets in background
-    forwardRsvpToGoogleSheets(newRSVP);
+    // Automatically forward new RSVP directly to Google Sheets in real-time
+    await forwardRsvpToGoogleSheets(newRSVP);
 
     return res.status(201).json({ ...newRSVP, isUpdated: false });
   });
 
-  async function forwardRsvpToGoogleSheets(rsvp: RSVP) {
+  async function forwardRsvpToGoogleSheets(rsvp: RSVP): Promise<boolean> {
     try {
       const event = loadEvent();
       const webhookUrl = event.googleSheetsWebhookUrl || process.env.GOOGLE_SHEETS_WEBHOOK_URL;
       if (!webhookUrl || typeof webhookUrl !== 'string' || !webhookUrl.startsWith('http')) {
-        return;
+        return false;
       }
 
       const payload = {
@@ -885,14 +805,28 @@ async function startServer() {
         attending: rsvp.attending ? 'מגיע/ה' : 'לא מגיע/ה',
       };
 
-      fetch(webhookUrl, {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+      const response = await fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
         redirect: 'follow',
-      }).catch((err) => console.warn('[GoogleSheets] Background forward error:', err));
-    } catch (err) {
-      console.warn('[GoogleSheets] Error in forwardRsvpToGoogleSheets:', err);
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      if (response.ok) {
+        console.log(`[GoogleSheets] Live RSVP successfully saved to sheet for: ${payload.combinedNames}`);
+        return true;
+      } else {
+        console.warn(`[GoogleSheets] Webhook responded with status ${response.status} for: ${payload.combinedNames}`);
+        return false;
+      }
+    } catch (err: any) {
+      console.warn('[GoogleSheets] Forwarding error:', err?.message || err);
+      return false;
     }
   }
 
@@ -1346,14 +1280,15 @@ async function startServer() {
       const styleDescription = SOUVENIR_STYLE_PROMPTS[styleId] || SOUVENIR_STYLE_PROMPTS['watercolor'];
       const userCustom = (customPrompt && typeof customPrompt === 'string' && customPrompt.trim().length > 0) ? customPrompt.trim() : '';
 
-      // Craft strict identity-preserving, group-preserving instruction
+      // Craft strict identity-preserving, group-preserving, and modesty-preserving instruction
       const promptInstructions = [
         `CRITICAL TASK - USER COMMEMORATIVE PHOTO EDITING:`,
         `1. STRICT IDENTITY PRESERVATION: You MUST strictly preserve the EXACT facial features, facial structure, eye shape, nose, smile, skin tone, hair, age, gender, and personal likeness of every single person visible in the source photo. The person/people in the result MUST be unmistakably and faithfully recognizable as the exact individuals in the uploaded photo.`,
         `2. GROUP CONSISTENCY: Retain every person present in the source image in their relative positions. Do NOT omit any person and do NOT add any additional people.`,
-        `3. ARTISTIC STYLE TRANSFORMATION: Transform the clothing, background setting, artistic medium, and ambient lighting into the following style: "${styleDescription}".`,
-        userCustom ? `4. CUSTOM USER SPECIFICATION: "${userCustom}". Combine this seamlessly with the chosen style without compromising facial likeness.` : '',
-        `5. COMPOSITION: Center the subjects with comfortable headroom and keep the bottom 12% clean for a commemorative dedication. Produce a high-resolution, vibrant, festive portrait.`,
+        `3. STRICT MODESTY & SLEEVE PRESERVATION (צניעות): You MUST strictly maintain the modesty and clothing coverage of the subjects in the original photo. If the subjects in the uploaded photo are wearing shirts or dresses with sleeves, the generated clothing MUST also have sleeves (at least short sleeves or elbow/long sleeves). NEVER generate sleeveless, strapless, halter-neck, revealing, low-cut, or swimwear outfits under any circumstance (especially in Hawaiian vacation, princess, or party styles). All outfits must remain dignified, modest, respectful, and appropriately covered.`,
+        `4. ARTISTIC STYLE TRANSFORMATION: Transform the clothing, background setting, artistic medium, and ambient lighting into the following style: "${styleDescription}". Ensure the stylized clothing complies with the strict modesty and sleeve requirement.`,
+        userCustom ? `5. CUSTOM USER SPECIFICATION: "${userCustom}". Combine this seamlessly with the chosen style without compromising facial likeness or modest attire.` : '',
+        `6. COMPOSITION: Center the subjects with comfortable headroom and keep the bottom 12% clean for a commemorative dedication. Produce a high-resolution, vibrant, festive portrait.`,
       ].filter(Boolean).join('\n\n');
 
       let generatedDataUrl: string | null = null;
@@ -1467,8 +1402,12 @@ async function startServer() {
   app.get('/api/souvenirs', async (req: Request, res: Response) => {
     let items: SouvenirItem[] = [];
     const now = Date.now();
+    const forceRefresh = req.query.refresh === 'true';
 
-    if (cachedSouvenirsData && now - lastSouvenirsFetchTime < 30000) {
+    if (forceRefresh) {
+      cachedSouvenirsData = null;
+      firestoreQuotaExceededUntil = 0;
+    } else if (cachedSouvenirsData && now - lastSouvenirsFetchTime < 30000) {
       items = cachedSouvenirsData;
     } else if (firestoreDb && now > firestoreQuotaExceededUntil) {
       try {
@@ -1499,10 +1438,18 @@ async function startServer() {
       }
     }
 
-    const { style, limit, offset, all, format } = req.query;
+    const { style, search, limit, offset, all, format } = req.query;
     let result = items;
     if (style && style !== 'all') {
       result = result.filter((s) => s.styleId === style);
+    }
+    if (search && typeof search === 'string' && search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(
+        (s) =>
+          (s.creatorName && s.creatorName.toLowerCase().includes(q)) ||
+          (s.styleName && s.styleName.toLowerCase().includes(q))
+      );
     }
     const filteredTotal = result.length;
 

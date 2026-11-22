@@ -16,8 +16,8 @@ export async function updateEventDetails(event: Partial<EventDetails>): Promise<
   return res.json();
 }
 
-export async function fetchRSVPs(): Promise<RSVP[]> {
-  const res = await fetch('/api/rsvps');
+export async function fetchRSVPs(forceRefresh: boolean = false): Promise<RSVP[]> {
+  const res = await fetch(`/api/rsvps${forceRefresh ? '?refresh=true' : ''}`);
   if (!res.ok) throw new Error('שגיאה בטעינת אישורי ההגעה');
   return res.json();
 }
@@ -138,6 +138,7 @@ export async function generatePersonalPhotoSouvenir(
 
 export interface FetchSouvenirsParams {
   style?: string;
+  search?: string;
   limit?: number;
   offset?: number;
   all?: boolean;
@@ -158,6 +159,7 @@ export async function fetchSouvenirsPaginated(
 ): Promise<PaginatedSouvenirsResponse> {
   const query = new URLSearchParams();
   if (params.style && params.style !== 'all') query.set('style', params.style);
+  if (params.search && params.search.trim()) query.set('search', params.search.trim());
   query.set('limit', (params.limit !== undefined ? params.limit : 20).toString());
   query.set('offset', (params.offset !== undefined ? params.offset : 0).toString());
   if (params.all) query.set('all', 'true');
@@ -192,6 +194,7 @@ export async function fetchSouvenirs(
 ): Promise<SouvenirItem[]> {
   const query = new URLSearchParams();
   if (params?.style && params.style !== 'all') query.set('style', params.style);
+  if (params?.search && params.search.trim()) query.set('search', params.search.trim());
   if (params?.limit !== undefined) query.set('limit', params.limit.toString());
   if (params?.offset !== undefined) query.set('offset', params.offset.toString());
   if (params?.all) query.set('all', 'true');
@@ -250,3 +253,34 @@ export async function syncWithGoogleSheets(webhookUrl?: string): Promise<SyncShe
   return res.json();
 }
 
+export interface FirestoreStatusResponse {
+  quotaExceeded: boolean;
+  quotaExceededUntil: number;
+  projectId: string;
+  databaseId: string;
+  upgradeUrl: string;
+}
+
+export async function checkFirestoreStatus(retry: boolean = false): Promise<FirestoreStatusResponse> {
+  try {
+    const res = await fetch(`/api/firestore-status${retry ? '?retry=true' : ''}`);
+    if (!res.ok) {
+      return {
+        quotaExceeded: false,
+        quotaExceededUntil: 0,
+        projectId: '',
+        databaseId: '',
+        upgradeUrl: '',
+      };
+    }
+    return res.json();
+  } catch {
+    return {
+      quotaExceeded: false,
+      quotaExceededUntil: 0,
+      projectId: '',
+      databaseId: '',
+      upgradeUrl: '',
+    };
+  }
+}

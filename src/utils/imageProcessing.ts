@@ -106,68 +106,139 @@ export async function applyDedicationOverlay(
       // 1. Draw base photo
       ctx.drawImage(img, 0, 0, width, height);
 
+      const isPortrait = height > width;
+
       // 2. Bottom Banner Scrim (Frosted Botanical Scrim)
-      // Designed to be perfectly legible over both dark and bright photos without hiding faces
-      const bannerHeight = Math.max(96, Math.round(height * 0.12));
+      // Sleeker and compact, noticeably less tall
+      const bannerRatio = isPortrait ? 0.088 : 0.11;
+      const bannerHeight = Math.max(95, Math.round(height * bannerRatio));
       const bannerY = height - bannerHeight;
 
-      // Smooth gradient fade-in from transparent to rich deep botanical green
-      const gradient = ctx.createLinearGradient(0, bannerY - 32, 0, height);
-      gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-      gradient.addColorStop(0.28, 'rgba(23, 33, 22, 0.75)');
-      gradient.addColorStop(0.65, 'rgba(18, 26, 17, 0.90)');
-      gradient.addColorStop(1, 'rgba(13, 19, 12, 0.96)');
+      // Soft photographic blur / feather transition above the banner
+      const fadeHeight = Math.round(bannerHeight * 0.55);
+      const fadeStartY = bannerY - fadeHeight;
 
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, bannerY - 32, width, bannerHeight + 32);
+      // 1. Dreamy soft blur / feather transition above the banner
+      const fadeGradient = ctx.createLinearGradient(0, fadeStartY, 0, bannerY);
+      fadeGradient.addColorStop(0, 'rgba(11, 18, 12, 0)');
+      fadeGradient.addColorStop(0.2, 'rgba(11, 18, 12, 0.08)');
+      fadeGradient.addColorStop(0.4, 'rgba(10, 17, 11, 0.25)');
+      fadeGradient.addColorStop(0.6, 'rgba(8, 14, 9, 0.52)');
+      fadeGradient.addColorStop(0.8, 'rgba(6, 10, 7, 0.80)');
+      fadeGradient.addColorStop(1, 'rgba(5, 8, 5, 1)');
 
-      // 3. Luxurious golden divider line
-      const goldGrad = ctx.createLinearGradient(width * 0.08, 0, width * 0.92, 0);
-      goldGrad.addColorStop(0, 'rgba(224, 197, 138, 0)');
-      goldGrad.addColorStop(0.2, 'rgba(224, 197, 138, 0.7)');
-      goldGrad.addColorStop(0.5, 'rgba(255, 240, 204, 1)');
-      goldGrad.addColorStop(0.8, 'rgba(224, 197, 138, 0.7)');
-      goldGrad.addColorStop(1, 'rgba(224, 197, 138, 0)');
+      ctx.fillStyle = fadeGradient;
+      ctx.fillRect(0, fadeStartY, width, fadeHeight);
 
-      ctx.strokeStyle = goldGrad;
-      ctx.lineWidth = Math.max(1.5, Math.round(width * 0.002));
-      ctx.beginPath();
-      ctx.moveTo(width * 0.08, bannerY);
-      ctx.lineTo(width * 0.92, bannerY);
-      ctx.stroke();
+      // 2. Solid deep botanical black banner below (100% opaque, hides any underlying artifacts)
+      ctx.fillStyle = '#050805';
+      ctx.fillRect(0, bannerY, width, bannerHeight);
 
-      // Golden diamond emblem in the center of the divider line
-      ctx.fillStyle = '#F5E2B3';
-      ctx.beginPath();
-      const diamondSize = Math.max(4, Math.round(width * 0.005));
-      ctx.moveTo(width / 2, bannerY - diamondSize);
-      ctx.lineTo(width / 2 + diamondSize, bannerY);
-      ctx.moveTo(width / 2, bannerY + diamondSize);
-      ctx.lineTo(width / 2 - diamondSize, bannerY);
-      ctx.fill();
+      // Sizing balanced for both landscape and portrait
+      const baseDim = isPortrait
+        ? Math.min(width * 1.05, height * 0.75)
+        : Math.min(width, height * 1.35);
 
-      // 4. Primary Dedication Text: „מזכרת מבת המצווה של אורי קלזן”
+      const mainFontSize = Math.max(26, Math.round(baseDim * 0.0385));
+      const subFontSize = Math.max(14, Math.round(mainFontSize * 0.50));
+
+      // Tight, cohesive typographic rhythm - vertically centered in the green background
+      const lineSpacing = Math.round(mainFontSize * 0.96);
+      const bannerCenterY = bannerY + Math.round(bannerHeight * 0.51);
+      const mainY = Math.round(bannerCenterY - lineSpacing / 2);
+      const subY = mainY + lineSpacing;
+
+      // Primary Dedication Text: „מזכרת מבת המצווה של אורי קלזן”
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
+      ctx.direction = 'rtl';
 
-      const mainFontSize = Math.max(26, Math.round(width * 0.034));
-      ctx.font = `bold ${mainFontSize}px 'Frank Ruhl Libre', 'Rubik', serif, Arial`;
-
-      // Text Shadow for contrast
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+      ctx.font = `bold ${mainFontSize}px 'Noto Sans Hebrew', 'Rubik', sans-serif, Arial`;
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
       ctx.shadowBlur = 6;
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 2;
-
       ctx.fillStyle = '#FFFFFF';
-      ctx.fillText(dedicationText, width / 2, bannerY + bannerHeight * 0.42);
+      ctx.fillText(dedicationText, width / 2, mainY);
 
-      // 5. Secondary Date & Location Line
+      // Subtitle Line: "יום רביעי, כב' כסלו • 2.12.26 • קרני שומרון" + Leaf
+      const subText = "יום רביעי, כב' כסלו • 2.12.26 • קרני שומרון";
+      ctx.font = `500 ${subFontSize}px 'Noto Sans Hebrew', 'Rubik', sans-serif, Arial`;
+      const textWidth = Math.round(subFontSize * 18.8);
+      const leafSize = Math.round(subFontSize * 0.95);
+      const gap = Math.round(subFontSize * 0.45);
+
+      const textCenterX = Math.round(width / 2 - (leafSize + gap) / 2);
+      const leafX = Math.round(textCenterX + textWidth / 2 + gap);
+      const leafY = Math.round(subY - leafSize * 0.82);
+
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
       ctx.shadowBlur = 3;
-      const subFontSize = Math.max(13, Math.round(width * 0.018));
-      ctx.font = `500 ${subFontSize}px 'Rubik', sans-serif, Arial`;
-      ctx.fillStyle = '#D6E5D3';
-      ctx.fillText('יום רביעי, כב\' כסלו • 2.12.26 • קרני שומרון 🌿', width / 2, bannerY + bannerHeight * 0.76);
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 1;
+      ctx.fillStyle = '#D6E8D5';
+      ctx.fillText(subText, textCenterX, subY);
+
+      // Draw leaf icon
+      ctx.save();
+      ctx.translate(leafX, leafY);
+      const leafScale = leafSize / 24;
+      ctx.scale(leafScale, leafScale);
+
+      // Stem
+      ctx.strokeStyle = '#256029';
+      ctx.lineWidth = 1.8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(3, 21);
+      ctx.bezierCurveTo(2, 23, 0, 25, -2, 26);
+      ctx.stroke();
+
+      // Main leaf
+      const leafGrad = ctx.createLinearGradient(0, 21, 21, 3);
+      leafGrad.addColorStop(0, '#388E3C');
+      leafGrad.addColorStop(0.6, '#66BB6A');
+      leafGrad.addColorStop(1, '#A5D6A7');
+      ctx.fillStyle = leafGrad;
+      ctx.strokeStyle = '#2E7D32';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(3, 21);
+      ctx.bezierCurveTo(4, 14, 10, 5, 21, 3);
+      ctx.bezierCurveTo(19, 12, 14, 21, 3, 21);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Central vein
+      ctx.strokeStyle = '#256029';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(3, 21);
+      ctx.bezierCurveTo(8, 15, 13, 9, 21, 3);
+      ctx.stroke();
+
+      // Side vein branch
+      ctx.strokeStyle = '#337438';
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(9, 14);
+      ctx.bezierCurveTo(12, 14.5, 15, 13, 16, 11);
+      ctx.stroke();
+
+      // Flutter secondary leaf
+      ctx.fillStyle = '#81C784';
+      ctx.strokeStyle = '#2E7D32';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(2, 12);
+      ctx.bezierCurveTo(1, 9, -2, 8, -3, 9);
+      ctx.bezierCurveTo(-3, 11, 0, 13, 2, 12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.restore();
 
       resolve(canvas.toDataURL('image/jpeg', 0.93));
     };

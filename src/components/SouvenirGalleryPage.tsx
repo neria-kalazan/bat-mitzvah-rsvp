@@ -6,6 +6,7 @@ import {
   Sparkles,
   Share2,
   Trash2,
+  Tv,
 } from 'lucide-react';
 import { SouvenirItem, EventDetails, RSVP } from '../types';
 import { fetchSouvenirsPaginated, deleteSouvenir } from '../services/api';
@@ -23,6 +24,7 @@ interface SouvenirGalleryPageProps {
   onBack: () => void;
   onNavigateToDesign: () => void;
   primaryRsvp?: RSVP | null;
+  onOpenSlideshow?: () => void;
 }
 
 const ITEMS_PER_PAGE = 20;
@@ -32,6 +34,7 @@ export const SouvenirGalleryPage: React.FC<SouvenirGalleryPageProps> = ({
   onBack,
   onNavigateToDesign,
   primaryRsvp,
+  onOpenSlideshow,
 }) => {
   const [souvenirs, setSouvenirs] = useState<SouvenirItem[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
@@ -278,16 +281,31 @@ export const SouvenirGalleryPage: React.FC<SouvenirGalleryPageProps> = ({
             </h1>
           </div>
 
-          {/* CTA: Create Your Own Souvenir */}
-          <button
-            type="button"
-            onClick={onNavigateToDesign}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold text-white bg-[#3B4E38] hover:bg-[#2F402D] transition-colors shadow-xs cursor-pointer border border-[#4F674A]"
-            title="עיצוב מזכרת אישית משלכם"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-[#D8E6D6]" />
-            <span>עיצוב מזכרת</span>
-          </button>
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            {onOpenSlideshow && (
+              <button
+                type="button"
+                onClick={onOpenSlideshow}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-[#2C3E2A] bg-[#EEF5EC] hover:bg-[#DEEADB] transition-colors border border-[#BCD0BA] shadow-2xs cursor-pointer"
+                title="פתיחת מסך הקרנה (Slideshow) עם קש מקומי"
+              >
+                <Tv className="w-3.5 h-3.5 text-[#435940]" />
+                <span className="hidden sm:inline">הקרנת מצגת 📽️</span>
+              </button>
+            )}
+
+            {/* CTA: Create Your Own Souvenir */}
+            <button
+              type="button"
+              onClick={onNavigateToDesign}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold text-white bg-[#3B4E38] hover:bg-[#2F402D] transition-colors shadow-xs cursor-pointer border border-[#4F674A]"
+              title="עיצוב מזכרת אישית משלכם"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-[#D8E6D6]" />
+              <span>עיצוב מזכרת</span>
+            </button>
+          </div>
         </div>
       </header>
 

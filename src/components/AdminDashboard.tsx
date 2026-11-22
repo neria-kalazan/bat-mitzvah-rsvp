@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Users,
   Search,
@@ -23,9 +23,11 @@ import {
   ExternalLink,
   Send,
   Loader2,
+  Tv,
+  Play,
 } from 'lucide-react';
 import { RSVP, EventDetails, SouvenirItem } from '../types';
-import { fetchSouvenirs, deleteSouvenir, syncWithGoogleSheets } from '../services/api';
+import { fetchSouvenirsPaginated, deleteSouvenir, syncWithGoogleSheets, checkFirestoreStatus } from '../services/api';
 import { SOUVENIR_STYLES } from '../data/souvenirStyles';
 import { GOOGLE_APPS_SCRIPT_CODE } from '../data/googleAppsScriptTemplate';
 
@@ -36,6 +38,7 @@ export interface AdminDashboardProps {
   onDeleteRSVP: (id: string) => Promise<void>;
   onUpdateEvent: (updated: Partial<EventDetails>) => Promise<void>;
   onRefreshRSVPs?: () => Promise<void>;
+  onOpenSlideshow?: () => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -45,6 +48,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeleteRSVP,
   onUpdateEvent,
   onRefreshRSVPs,
+  onOpenSlideshow,
 }) => {
   const [activeTab, setActiveTab] = useState<'rsvps' | 'souvenirs' | 'settings'>('rsvps');
   const [filterType, setFilterType] = useState<'all' | 'friend' | 'family'>('all');
@@ -52,31 +56,196 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // Souvenirs management state for parents
+  const SOUVENIRS_PER_PAGE = 20;
+
+  // Souvenirs management state for parents (paginated)
   const [souvenirs, setSouvenirs] = useState<SouvenirItem[]>([]);
+  const [souvenirTotalCount, setSouvenirTotalCount] = useState<number>(0);
+  const [souvenirOverallTotal, setSouvenirOverallTotal] = useState<number>(0);
+  const [souvenirStyleCounts, setSouvenirStyleCounts] = useState<Record<string, number>>({});
+  const [souvenirHasMore, setSouvenirHasMore] = useState<boolean>(false);
   const [isLoadingSouvenirs, setIsLoadingSouvenirs] = useState(false);
+  const [isLoadingMoreSouvenirs, setIsLoadingMoreSouvenirs] = useState(false);
+  const [souvenirsLoadError, setSouvenirsLoadError] = useState<string | null>(null);
   const [souvenirSearch, setSouvenirSearch] = useState('');
+  const [debouncedSouvenirSearch, setDebouncedSouvenirSearch] = useState('');
   const [souvenirStyleFilter, setSouvenirStyleFilter] = useState('all');
   const [deletingSouvenirId, setDeletingSouvenirId] = useState<string | null>(null);
   const [confirmDeleteSouvenir, setConfirmDeleteSouvenir] = useState<SouvenirItem | null>(null);
   const [previewSouvenir, setPreviewSouvenir] = useState<SouvenirItem | null>(null);
   const [souvenirDeleteSuccess, setSouvenirDeleteSuccess] = useState<string | null>(null);
 
-  // Load souvenirs on mount
-  const loadSouvenirsList = async () => {
+  const souvenirOffsetRef = useRef<number>(0);
+  const isLoadingMoreSouvenirsRef = useRef<boolean>(false);
+  const souvenirSentinelRef = useRef<HTMLDivElement | null>(null);
+  const hasUserScrolledSouvenirsRef = useRef<boolean>(false);
+
+  // Debounce souvenir search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSouvenirSearch(souvenirSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [souvenirSearch]);
+
+  // Load initial batch of 20 souvenirs (on mount, filter/search change, or manual refresh)
+  const loadInitialSouvenirs = useCallback(async (styleId: string = 'all', searchStr: string = '') => {
     try {
       setIsLoadingSouvenirs(true);
-      const items = await fetchSouvenirs({ all: true });
-      setSouvenirs(items);
-    } catch (err) {
+      setSouvenirsLoadError(null);
+      souvenirOffsetRef.current = 0;
+      hasUserScrolledSouvenirsRef.current = false;
+
+      const data = await fetchSouvenirsPaginated({
+        style: styleId,
+        search: searchStr,
+        limit: SOUVENIRS_PER_PAGE,
+        offset: 0,
+      });
+
+      setSouvenirs(data.items);
+      setSouvenirTotalCount(data.total);
+      setSouvenirOverallTotal(data.overallTotal);
+      if (data.styleCounts && Object.keys(data.styleCounts).length > 0) {
+        setSouvenirStyleCounts(data.styleCounts);
+      }
+      setSouvenirHasMore(data.hasMore && data.items.length < data.total);
+      souvenirOffsetRef.current = data.items.length;
+    } catch (err: any) {
       console.error('Error fetching souvenirs in admin:', err);
+      setSouvenirsLoadError(err?.message || 'שגיאה בטעינת תמונות המזכרות מהשרת');
     } finally {
       setIsLoadingSouvenirs(false);
+    }
+  }, []);
+
+  // Load next batch of 20 souvenirs when scrolling down
+  const loadNextSouvenirsBatch = useCallback(async () => {
+    if (!souvenirHasMore || isLoadingMoreSouvenirsRef.current || isLoadingSouvenirs) return;
+
+    try {
+      isLoadingMoreSouvenirsRef.current = true;
+      setIsLoadingMoreSouvenirs(true);
+
+      const currentOffset = souvenirOffsetRef.current;
+      const data = await fetchSouvenirsPaginated({
+        style: souvenirStyleFilter,
+        search: debouncedSouvenirSearch,
+        limit: SOUVENIRS_PER_PAGE,
+        offset: currentOffset,
+      });
+
+      if (data.items.length > 0) {
+        setSouvenirs((prev) => {
+          const existingIds = new Set(prev.map((s) => s.id));
+          const newUnique = data.items.filter((s) => !existingIds.has(s.id));
+          return [...prev, ...newUnique];
+        });
+        souvenirOffsetRef.current = currentOffset + data.items.length;
+      }
+
+      setSouvenirTotalCount(data.total);
+      setSouvenirOverallTotal(data.overallTotal);
+      if (data.styleCounts && Object.keys(data.styleCounts).length > 0) {
+        setSouvenirStyleCounts(data.styleCounts);
+      }
+      setSouvenirHasMore(data.hasMore && data.items.length > 0 && souvenirOffsetRef.current < data.total);
+    } catch (err) {
+      console.error('Error loading more souvenirs in admin:', err);
+    } finally {
+      isLoadingMoreSouvenirsRef.current = false;
+      setIsLoadingMoreSouvenirs(false);
+    }
+  }, [souvenirHasMore, isLoadingSouvenirs, souvenirStyleFilter, debouncedSouvenirSearch]);
+
+  useEffect(() => {
+    loadInitialSouvenirs(souvenirStyleFilter, debouncedSouvenirSearch);
+  }, [souvenirStyleFilter, debouncedSouvenirSearch, loadInitialSouvenirs]);
+
+  // Infinite scroll IntersectionObserver for souvenirs tab
+  useEffect(() => {
+    if (activeTab !== 'souvenirs') return;
+    const sentinel = souvenirSentinelRef.current;
+    if (!sentinel || !souvenirHasMore || isLoadingSouvenirs) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          entries[0].isIntersecting &&
+          souvenirHasMore &&
+          !isLoadingMoreSouvenirsRef.current &&
+          !isLoadingSouvenirs &&
+          (hasUserScrolledSouvenirsRef.current || window.scrollY > 20)
+        ) {
+          loadNextSouvenirsBatch();
+        }
+      },
+      {
+        root: null,
+        rootMargin: '300px',
+        threshold: 0.05,
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [activeTab, souvenirHasMore, isLoadingSouvenirs, loadNextSouvenirsBatch]);
+
+  // Window scroll fallback for infinite autoscroll on souvenirs tab
+  useEffect(() => {
+    if (activeTab !== 'souvenirs') return;
+
+    const handleWindowScroll = () => {
+      if (window.scrollY > 20) {
+        hasUserScrolledSouvenirsRef.current = true;
+      }
+
+      if (
+        !souvenirHasMore ||
+        isLoadingMoreSouvenirsRef.current ||
+        isLoadingSouvenirs ||
+        !hasUserScrolledSouvenirsRef.current
+      ) {
+        return;
+      }
+
+      const scrollHeight = document.documentElement.scrollHeight;
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const clientHeight = window.innerHeight;
+
+      if (scrollTop > 80 && scrollTop + clientHeight >= scrollHeight - 350) {
+        loadNextSouvenirsBatch();
+      }
+    };
+
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleWindowScroll);
+  }, [activeTab, souvenirHasMore, isLoadingSouvenirs, loadNextSouvenirsBatch]);
+
+  // Firestore Quota Detection state
+  const [firestoreQuotaExceeded, setFirestoreQuotaExceeded] = useState(false);
+  const [isRetryingFirestore, setIsRetryingFirestore] = useState(false);
+  const [firestoreUpgradeUrl, setFirestoreUpgradeUrl] = useState(
+    'https://console.firebase.google.com/project/watchful-virtue-698sv/firestore/databases/ai-studio-batmitzvahrsvp-7b9fa98e-b18a-4e8a-a9e5-6aa16b5ba9f1/data?openUpgradeDialog=true'
+  );
+
+  const checkQuota = async (retry: boolean = false) => {
+    try {
+      if (retry) setIsRetryingFirestore(true);
+      const status = await checkFirestoreStatus(retry);
+      setFirestoreQuotaExceeded(status.quotaExceeded);
+      if (status.upgradeUrl) setFirestoreUpgradeUrl(status.upgradeUrl);
+      if (retry && !status.quotaExceeded) {
+        if (onRefreshRSVPs) await onRefreshRSVPs();
+        await loadInitialSouvenirs(souvenirStyleFilter, debouncedSouvenirSearch);
+      }
+    } finally {
+      if (retry) setIsRetryingFirestore(false);
     }
   };
 
   useEffect(() => {
-    loadSouvenirsList();
+    checkQuota();
   }, []);
 
   const handleDeleteSouvenir = async (item: SouvenirItem) => {
@@ -84,6 +253,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setDeletingSouvenirId(item.id);
       await deleteSouvenir(item.id);
       setSouvenirs((prev) => prev.filter((s) => s.id !== item.id));
+      souvenirOffsetRef.current = Math.max(0, souvenirOffsetRef.current - 1);
+      setSouvenirTotalCount((prev) => Math.max(0, prev - 1));
+      setSouvenirOverallTotal((prev) => Math.max(0, prev - 1));
+      if (item.styleId) {
+        setSouvenirStyleCounts((prev) => ({
+          ...prev,
+          [item.styleId]: Math.max(0, (prev[item.styleId] || 1) - 1),
+        }));
+      }
       setConfirmDeleteSouvenir(null);
       if (previewSouvenir?.id === item.id) {
         setPreviewSouvenir(null);
@@ -200,16 +378,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return true;
   });
 
-  const filteredSouvenirs = souvenirs.filter((s) => {
-    if (souvenirStyleFilter !== 'all' && s.styleId !== souvenirStyleFilter) return false;
-    if (souvenirSearch.trim()) {
-      const q = souvenirSearch.toLowerCase();
-      const matchCreator = s.creatorName.toLowerCase().includes(q);
-      const matchStyle = s.styleName.toLowerCase().includes(q);
-      return matchCreator || matchStyle;
-    }
-    return true;
-  });
+  const filteredSouvenirs = souvenirs;
 
   const handleDelete = async (id: string, name: string) => {
     if (!window.confirm(`האם למחוק את אישור ההגעה של ${name}?`)) return;
@@ -319,6 +488,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <span className="hidden sm:inline">סנכרון ל-Sheets</span>
             </button>
 
+            {onOpenSlideshow && (
+              <button
+                type="button"
+                onClick={onOpenSlideshow}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2B3F2A] hover:bg-[#1E2D1D] text-white text-xs font-bold rounded-full shadow-2xs transition-colors cursor-pointer border border-[#446342]"
+                title="פתיחת מסך תצוגה והקרנה לאירוע (Slideshow)"
+              >
+                <Tv className="w-3.5 h-3.5 text-[#A5D6A0]" />
+                <span className="hidden sm:inline">מסך תצוגה להקרנה 📽️</span>
+                <span className="sm:hidden">הקרנה 📽️</span>
+              </button>
+            )}
+
             <button
               onClick={exportCSV}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-[#435940] hover:bg-[#344732] text-white text-xs font-semibold rounded-full shadow-2xs transition-colors cursor-pointer"
@@ -333,6 +515,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Main Container */}
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        {/* Firestore Quota Banner */}
+        {firestoreQuotaExceeded && (
+          <div className="p-4 sm:p-5 rounded-2xl border border-amber-300 bg-amber-50/90 text-amber-950 shadow-sm transition-all space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-amber-100 text-amber-800 shrink-0 mt-0.5">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="flex-1 text-xs sm:text-sm space-y-1">
+                <h4 className="font-bold text-amber-900 text-sm sm:text-base">
+                  שים לב: מסד הנתונים בפיירבייס הגיע למגבלת הקריאות היומית החינמית (Free Tier Quota)
+                </h4>
+                <p className="text-amber-800 leading-relaxed">
+                  <strong>הנתונים לא נמחקו כלל!</strong> כל אישורי ההגעה והתמונות שנוצרו שמורים במלואם בענן Firestore. עקב מכסת הקריאה היומית החינמית (50,000 קריאות ביום), המערכת מציגה זמנית את נתוני הגיבוי המקומיים.
+                </p>
+                <p className="text-amber-800 leading-relaxed text-xs">
+                  המכסה מתאפסת אוטומטית בחצות (שעון פסיפיק), או שניתן לשדרג בלחיצה לתוכנית Blaze (תשלום לפי שימוש, בעלות של שברי אגורה לחודש) לקריאה ללא הגבלה.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1 sm:mr-11">
+              <a
+                href={firestoreUpgradeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>צפייה בנתונים ושדרוג ב-Firebase Console</span>
+              </a>
+
+              <button
+                type="button"
+                onClick={() => checkQuota(true)}
+                disabled={isRetryingFirestore}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-amber-700 ${isRetryingFirestore ? 'animate-spin' : ''}`} />
+                <span>{isRetryingFirestore ? 'בודק התחברות...' : 'בדוק חיבור מחדש עכשיו'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Sync Status Banner */}
         {syncSheetsStatus && (
           <div
@@ -415,7 +641,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <button
             onClick={() => {
               setActiveTab('souvenirs');
-              loadSouvenirsList();
+              if (souvenirs.length === 0 || souvenirsLoadError) {
+                loadInitialSouvenirs(souvenirStyleFilter, debouncedSouvenirSearch);
+              }
             }}
             className={`pb-3 px-4 text-xs sm:text-sm font-semibold border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'souvenirs'
@@ -424,7 +652,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }`}
           >
             <ImageIcon className="w-3.5 h-3.5" />
-            <span>ניהול תמונות ומזכרות ({souvenirs.length})</span>
+            <span>ניהול תמונות ומזכרות ({souvenirOverallTotal || souvenirs.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('settings')}
@@ -645,12 +873,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
+            {/* Prominent Slideshow Feature Hero Banner */}
+            <div className="bg-gradient-to-r from-[#212E24] via-[#2D3E30] to-[#1E2A20] border-2 border-[#486749] rounded-3xl p-5 sm:p-6 text-white shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5 text-right">
+                <div className="w-13 h-13 rounded-2xl bg-[#374C3A] border border-[#597F5C] flex items-center justify-center text-3xl shadow-inner shrink-0">
+                  📽️
+                </div>
+                <div>
+                  <div className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#A8D3A4] bg-[#162118] px-2.5 py-0.5 rounded-full border border-[#3E5C41] mb-1">
+                    <Sparkles className="w-3 h-3 text-[#A8D3A4]" />
+                    <span>מצב הקרנה לאולם האירועים</span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-bold text-white font-['Rubik',sans-serif]">
+                    מסך תצוגה והקרנה לאירוע (Slideshow)
+                  </h3>
+                  <p className="text-xs sm:text-sm text-stone-300 font-normal mt-0.5 leading-relaxed max-w-xl">
+                    הקרנת כל התמונות והמזכרות של האורחים במסך מלא על גבי מקרן. המערכת טוענת ושומרת את כל התמונות מראש לקש מקומי (IndexedDB), כך שתוכלו לנתק את האינטרנט ולהקרין ברצף ללא חשש מניתוקים.
+                  </p>
+                </div>
+              </div>
+
+              {onOpenSlideshow && (
+                <button
+                  type="button"
+                  onClick={onOpenSlideshow}
+                  className="w-full md:w-auto px-5 py-3 rounded-2xl bg-gradient-to-r from-[#4E7649] to-[#63935C] hover:from-[#3F613B] hover:to-[#527D4C] active:scale-95 text-white text-xs sm:text-sm font-bold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0 border border-[#7BB174]"
+                >
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>פתיחת מסך הקרנה (Slideshow) 📽️</span>
+                </button>
+              )}
+            </div>
+
             {/* Header info & actions */}
             <div className="bg-white rounded-3xl p-5 sm:p-6 border border-[#E3ECE1] shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="text-right">
                 <h2 className="text-lg sm:text-xl font-bold text-[#253322] flex items-center gap-2">
                   <ImageIcon className="w-5 h-5 text-[#4A5D47]" />
-                  <span>ניהול תמונות ומזכרות בגלריה ({souvenirs.length})</span>
+                  <span>ניהול תמונות ומזכרות בגלריה ({souvenirOverallTotal || souvenirs.length})</span>
                 </h2>
                 <p className="text-xs sm:text-sm text-[#5C7059] mt-1 max-w-2xl leading-relaxed">
                   צפייה בכל התמונות שנוצרו על ידי האורחים בגלריה. באפשרותכם להגדיל כל תמונה, או למחוק תמונות שלא יצאו טוב, תמונות כפולות או תמונות שהועלו בטעות.
@@ -659,7 +919,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <button
                 type="button"
-                onClick={loadSouvenirsList}
+                onClick={() => loadInitialSouvenirs(souvenirStyleFilter, debouncedSouvenirSearch)}
                 disabled={isLoadingSouvenirs}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#FAF7F2] hover:bg-[#EEF4EC] text-[#344732] border border-[#CCD9CA] transition-colors cursor-pointer shrink-0 disabled:opacity-50"
               >
@@ -692,10 +952,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       : 'bg-[#FAF7F2] hover:bg-[#EFF5ED] text-[#4A5D47] border border-[#D5E1D3]'
                   }`}
                 >
-                  הכל ({souvenirs.length})
+                  הכל ({souvenirOverallTotal || souvenirs.length})
                 </button>
                 {SOUVENIR_STYLES.map((style) => {
-                  const count = souvenirs.filter((s) => s.styleId === style.id).length;
+                  const count =
+                    souvenirStyleCounts[style.id] ??
+                    souvenirs.filter((s) => s.styleId === style.id).length;
                   if (count === 0 && souvenirStyleFilter !== style.id) return null;
                   return (
                     <button
@@ -723,6 +985,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="w-10 h-10 border-3 border-[#3B4E38]/20 border-t-[#3B4E38] rounded-full animate-spin mx-auto mb-3" />
                 <p className="text-xs sm:text-sm text-[#5B6D57]">טוען תמונות מהגלריה...</p>
               </div>
+            ) : souvenirsLoadError ? (
+              <div className="py-16 text-center bg-white rounded-3xl border border-red-200 p-8 space-y-3">
+                <div className="w-14 h-14 rounded-full bg-red-50 border border-red-200 flex items-center justify-center mx-auto text-red-600">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-[#2A3728]">{souvenirsLoadError}</h3>
+                <button
+                  type="button"
+                  onClick={() => loadInitialSouvenirs(souvenirStyleFilter, debouncedSouvenirSearch)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#3B4E38] hover:bg-[#2F402D] text-white text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>נסה לטעון שוב</span>
+                </button>
+              </div>
             ) : filteredSouvenirs.length === 0 ? (
               <div className="py-16 text-center bg-white rounded-3xl border border-[#E3ECE1] p-8">
                 <div className="w-16 h-16 rounded-full bg-[#EEF5EC] border border-[#CCDCCD] flex items-center justify-center text-3xl mx-auto mb-3">
@@ -740,6 +1017,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </p>
               </div>
             ) : (
+              <>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5 sm:gap-4.5">
                 {filteredSouvenirs.map((item) => {
                   const styleObj = SOUVENIR_STYLES.find((s) => s.id === item.styleId);
@@ -818,6 +1096,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   );
                 })}
               </div>
+
+              {/* Sentinel element for infinite autoscroll */}
+              <div ref={souvenirSentinelRef} className="h-8 w-full pointer-events-none" />
+
+              {/* Subtle Loading Spinner Indicator while autoscrolling */}
+              {isLoadingMoreSouvenirs && (
+                <div className="py-6 flex items-center justify-center gap-2 text-xs text-[#52684E] animate-in fade-in duration-150">
+                  <div className="w-4 h-4 border-2 border-[#3B4E38]/20 border-t-[#3B4E38] rounded-full animate-spin" />
+                  <span>טוען 20 תמונות נוספות...</span>
+                </div>
+              )}
+
+              {/* End of gallery indicator */}
+              {!souvenirHasMore && souvenirs.length > 0 && (
+                <div className="py-6 text-center text-xs text-[#7A8F76] font-medium">
+                  🌿 הוצגו כל המזכרות ({souvenirTotalCount || souvenirs.length}) 🌿
+                </div>
+              )}
+              </>
             )}
           </div>
         )}
